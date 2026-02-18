@@ -1,0 +1,339 @@
+---
+title: Advanced Usage
+description: Master advanced features including multiple directories, file patterns, and build tags
+---
+
+## Multiple Source Directories
+
+Broccoli can bundle files from multiple directories into a single embedded filesystem:
+
+```go
+//go:generate broccoli -src=public,assets,templates -o bundle
+```
+
+This creates a unified filesystem containing all files from:
+- `public/`
+- `assets/`
+- `templates/`
+
+### Example: Multi-Source Bundle
+
+```go
+package main
+
+import (
+    "log"
+    "net/http"
+)
+
+//go:generate broccoli -src=static,uploads,themes -o content
+
+func main() {
+    // All three directories are accessible in the bundle
+    
+    // Open from 'static' directory
+    f1, _ := content.Open("static/app.js")
+    defer f1.Close()
+    
+    // Open from 'uploads' directory
+    f2, _ := content.Open("uploads/default-avatar.png")
+    defer f2.Close()
+    
+    // Open from 'themes' directory
+    f3, _ := content.Open("themes/dark.css")
+    defer f3.Close()
+    
+    // Serve all content
+    http.ListenAndServe(":8080", content.Serve(""))
+}
+```
+
+<Warning>
+If multiple source directories contain files with the same relative path, only one will be included in the bundle. The order of precedence follows the order specified in the `-src` flag.
+</Warning>
+
+## File Filtering
+
+### Include Patterns
+
+Use `-include` to bundle only specific file types:
+
+<Tabs>
+  <Tab title="Single Pattern">
+    ```go
+    //go:generate broccoli -src public -include="*.html"
+    ```
+    
+    This bundles only HTML files.
+  </Tab>
+
+  <Tab title="Multiple Patterns">
+    ```go
+    //go:generate broccoli -src assets -include="*.css,*.js,*.woff2"
+    ```
+    
+    This bundles CSS, JavaScript, and font files.
+  </Tab>
+
+  <Tab title="WebAssembly">
+    ```go
+    //go:generate broccoli -src wasm -include="*.wasm"
+    ```
+    
+    Perfect for embedding WebAssembly binaries.
+  </Tab>
+</Tabs>
+
+### Exclude Patterns
+
+Use `-exclude` to omit specific files:
+
+```go
+//go:generate broccoli -src public -exclude="*.map,*.md"
+```
+
+This bundles all files except source maps and markdown files.
+
+### Combining Include and Exclude
+
+```go
+//go:generate broccoli -src assets -include="*.js" -exclude="*.test.js"
+```
+
+This includes all JavaScript files but excludes test files.
+
+## Using .gitignore Rules
+
+Broccoli can respect your existing `.gitignore` files:
+
+```go
+//go:generate broccoli -src public -gitignore
+```
+
+<Steps>
+  <Step title="How it works">
+    Broccoli parses `.gitignore` files in each directory and excludes matching files from the bundle.
+  </Step>
+
+  <Step title="Benefits">
+    - No need to duplicate ignore patterns
+    - Automatically excludes development files
+    - Keeps your bundle clean
+  </Step>
+
+  <Step title="Example">
+    With this `.gitignore` in your `public/` directory:
+    
+    ```txt
+    # public/.gitignore
+    *.log
+    .DS_Store
+    node_modules/
+    ```
+    
+    These files won't be included in your bundle.
+  </Step>
+</Steps>
+
+## Custom Variable Names
+
+By default, Broccoli uses the output filename as the variable name. You can customize it:
+
+<CodeGroup>
+```go Default Behavior
+//go:generate broccoli -src public -o assets
+// Creates variable: assets
+
+func main() {
+    assets.Open("public/index.html")
+}
+```
+
+```go Custom Variable
+//go:generate broccoli -src public -o assets -var myFiles
+// Creates variable: myFiles
+
+func main() {
+    myFiles.Open("public/index.html")
+}
+```
+</CodeGroup>
+
+### Use Case: Multiple Bundles
+
+Create multiple bundles in the same package:
+
+```go
+package main
+
+//go:generate broccoli -src public -o bundle1 -var publicFiles
+//go:generate broccoli -src admin -o bundle2 -var adminFiles
+
+func main() {
+    // Serve public files
+    http.Handle("/", publicFiles.Serve("public"))
+    
+    // Serve admin files on different path
+    http.Handle("/admin/", adminFiles.Serve("admin"))
+    
+    http.ListenAndServe(":8080", nil)
+}
+```
+
+## Build Tags
+
+While Broccoli doesn't support per-file build tags, you can use Go's build tags with the generated files:
+
+<Tabs>
+  <Tab title="Production Bundle">
+    Create `assets_prod.go`:
+    
+    ```go
+    //go:build prod
+    
+    package main
+    
+    //go:generate broccoli -src public -o assets_prod -var assets
+    ```
+  </Tab>
+
+  <Tab title="Development Bundle">
+    Create `assets_dev.go`:
+    
+    ```go
+    //go:build !prod
+    
+    package main
+    
+    //go:generate broccoli -src public -o assets_dev -var assets -quality=1
+    ```
+    
+    Uses lower compression for faster builds during development.
+  </Tab>
+
+  <Tab title="Build Commands">
+    ```bash
+    # Production build
+    go build -tags prod
+    
+    # Development build
+    go build
+    ```
+  </Tab>
+</Tabs>
+
+## Advanced Patterns
+
+### Conditional Embedding
+
+```go
+package main
+
+import "os"
+
+//go:generate broccoli -src public -o assets
+
+func main() {
+    // Use embedded files in production
+    if os.Getenv("ENVIRONMENT") == "production" {
+        serveEmbedded()
+    } else {
+        // Use filesystem in development
+        serveFromDisk()
+    }
+}
+
+func serveEmbedded() {
+    http.ListenAndServe(":8080", assets.Serve("public"))
+}
+
+func serveFromDisk() {
+    http.ListenAndServe(":8080", http.FileServer(http.Dir("public")))
+}
+```
+
+### Selective File Reading
+
+```go
+import (
+    "os"
+    "strings"
+)
+
+func loadOnlyImages() error {
+    return assets.Walk("public", func(path string, info os.FileInfo, err error) error {
+        if err != nil {
+            return err
+        }
+        
+        // Process only image files
+        if !info.IsDir() {
+            ext := strings.ToLower(filepath.Ext(path))
+            if ext == ".jpg" || ext == ".png" || ext == ".gif" {
+                f, err := assets.Open(path)
+                if err != nil {
+                    return err
+                }
+                defer f.Close()
+                
+                // Process image...
+            }
+        }
+        return nil
+    })
+}
+```
+
+### Namespace Organization
+
+```go
+package main
+
+import "myapp/embedded"
+
+// In embedded/web.go:
+//go:generate broccoli -src ../../public -o web -var Web
+
+// In embedded/docs.go:
+//go:generate broccoli -src ../../docs -o documentation -var Docs
+
+func main() {
+    http.Handle("/", embedded.Web.Serve("public"))
+    http.Handle("/docs/", embedded.Docs.Serve("docs"))
+    http.ListenAndServe(":8080", nil)
+}
+```
+
+## Performance Tips
+
+<AccordionGroup>
+  <Accordion title="Bundle size optimization">
+    - Use `-include` to bundle only necessary files
+    - Exclude source maps in production: `-exclude="*.map"`
+    - Use `-gitignore` to automatically exclude development files
+    - Pre-minify assets before bundling
+  </Accordion>
+
+  <Accordion title="Build time optimization">
+    - Use lower compression during development: `-quality=1`
+    - Split large bundles into multiple smaller ones
+    - Use build tags to skip bundle generation when not needed
+  </Accordion>
+
+  <Accordion title="Memory optimization">
+    - Use optional decompression (`-opt`) for large files
+    - Split bundles by access frequency
+    - Consider development mode for local testing
+  </Accordion>
+</AccordionGroup>
+
+## Next Steps
+
+<CardGroup cols={2}>
+  <Card title="Compression Options" icon="compress" href="/guides/compression">
+    Learn about compression levels and optional decompression
+  </Card>
+  <Card title="Development Mode" icon="code" href="/guides/development-mode">
+    Speed up development with filesystem fallback
+  </Card>
+</CardGroup>

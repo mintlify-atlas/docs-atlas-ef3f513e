@@ -1,0 +1,381 @@
+---
+title: Compression
+description: Optimize compression levels and understand decompression strategies for best performance
+---
+
+## Understanding Brotli Compression
+
+Broccoli uses [Brotli](https://github.com/google/brotli), Google's compression algorithm, which provides **13-25% better compression** than traditional gzip.
+
+<Info>
+Brotli is particularly effective for text-based files like HTML, CSS, JavaScript, JSON, and XML, often achieving compression ratios of 10:1 or better.
+</Info>
+
+## Compression Levels
+
+Brotli supports compression levels from 1 to 11:
+
+<Tabs>
+  <Tab title="Level 11 (Default)">
+    **Maximum Compression**
+    
+    ```go
+    //go:generate broccoli -src public
+    // or explicitly:
+    //go:generate broccoli -src public -quality=11
+    ```
+    
+    - **Best for:** Production builds
+    - **Compression ratio:** Highest (smallest binaries)
+    - **Build time:** Slowest
+    - **Use when:** Binary size matters most
+  </Tab>
+
+  <Tab title="Level 6">
+    **Balanced**
+    
+    ```go
+    //go:generate broccoli -src public -quality=6
+    ```
+    
+    - **Best for:** Development with reasonable compression
+    - **Compression ratio:** Good
+    - **Build time:** Moderate
+    - **Use when:** You want a balance of size and speed
+  </Tab>
+
+  <Tab title="Level 1">
+    **Fastest Compression**
+    
+    ```go
+    //go:generate broccoli -src public -quality=1
+    ```
+    
+    - **Best for:** Rapid development iteration
+    - **Compression ratio:** Moderate
+    - **Build time:** Fastest
+    - **Use when:** You frequently regenerate bundles
+  </Tab>
+</Tabs>
+
+## Compression Quality Comparison
+
+Based on typical web assets:
+
+| Quality | Compression Ratio | Build Time | Binary Size | Best Use Case |
+|---------|------------------|------------|-------------|---------------|
+| 1       | ~5:1             | 1x         | 100%        | Development   |
+| 4       | ~7:1             | 3x         | 71%         | Testing       |
+| 6       | ~8:1             | 5x         | 62%         | CI/CD         |
+| 9       | ~9:1             | 15x        | 56%         | Staging       |
+| 11      | ~10:1            | 30x        | 50%         | Production    |
+
+<Note>
+Actual results vary based on file types and content. Text files compress better than binary files.
+</Note>
+
+## Optional Decompression
+
+By default, Broccoli decompresses all files when the bundle is loaded. With **optional decompression**, files are decompressed only when first accessed.
+
+### Enabling Optional Decompression
+
+```go
+//go:generate broccoli -src public -opt
+```
+
+### How It Works
+
+<Steps>
+  <Step title="Bundle Loading">
+    When your program starts, the bundle is loaded but files remain compressed in memory.
+  </Step>
+
+  <Step title="First Access">
+    When you first call `Open()` or `Read()` on a file, it's decompressed and cached.
+  </Step>
+
+  <Step title="Subsequent Access">
+    Future reads use the cached decompressed data.
+  </Step>
+</Steps>
+
+### When to Use Optional Decompression
+
+<Tabs>
+  <Tab title="Use When">
+    **Large bundles** (more than 10 MB compressed)
+    
+    ```go
+    //go:generate broccoli -src assets -opt
+    // Large asset libraries benefit most
+    ```
+    
+    **Selective file access** (not all files used)
+    
+    ```go
+    //go:generate broccoli -src themes -opt
+    // Only active theme files are decompressed
+    ```
+    
+    **Memory-constrained environments**
+    
+    ```go
+    //go:generate broccoli -src public -opt
+    // Reduces initial memory footprint
+    ```
+  </Tab>
+
+  <Tab title="Don't Use When">
+    **Small bundles** (less than 1 MB compressed)
+    
+    The overhead isn't worth it.
+    
+    **All files accessed at startup**
+    
+    ```go
+    // Bad: decompressing everything anyway
+    func init() {
+        assets.Walk("public", func(path string, info os.FileInfo, err error) error {
+            f, _ := assets.Open(path)
+            // Process all files...
+        })
+    }
+    ```
+    
+    **Latency-sensitive applications**
+    
+    First access to each file will be slower.
+  </Tab>
+</Tabs>
+
+## Performance Tuning
+
+### Strategy 1: Environment-Based Quality
+
+Use different compression levels for different environments:
+
+<CodeGroup>
+```go assets_dev.go
+//go:build dev
+
+package main
+
+//go:generate broccoli -src public -o assets_dev -var assets -quality=1
+```
+
+```go assets_prod.go
+//go:build !dev
+
+package main
+
+//go:generate broccoli -src public -o assets_prod -var assets -quality=11
+```
+
+```bash Build Commands
+# Fast development build
+go generate -tags dev
+go build -tags dev
+
+# Optimized production build
+go generate
+go build
+```
+</CodeGroup>
+
+### Strategy 2: Split Bundles by Type
+
+Compress different file types with different settings:
+
+```go
+package main
+
+// Text files: high compression, optional decompression
+//go:generate broccoli -src public -include="*.html,*.css,*.js" -o text -var textAssets -quality=11 -opt
+
+// Images: low compression (already compressed)
+//go:generate broccoli -src public -include="*.jpg,*.png,*.gif" -o images -var imageAssets -quality=4
+
+// Fonts: medium compression, no optional decompression
+//go:generate broccoli -src public -include="*.woff2,*.ttf" -o fonts -var fontAssets -quality=6
+
+func main() {
+    // Each bundle optimized for its content type
+}
+```
+
+### Strategy 3: Lazy Loading Bundles
+
+Load bundles only when needed:
+
+```go
+package main
+
+//go:generate broccoli -src themes -o themes -opt
+
+var currentTheme *http.File
+
+func loadTheme(name string) error {
+    // Theme files are decompressed on-demand
+    theme, err := themes.Open(fmt.Sprintf("themes/%s/style.css", name))
+    if err != nil {
+        return err
+    }
+    currentTheme = &theme
+    return nil
+}
+
+func main() {
+    // Only load theme when user selects it
+    if err := loadTheme("dark"); err != nil {
+        log.Fatal(err)
+    }
+}
+```
+
+## Measuring Compression Effectiveness
+
+### Check Bundle Size
+
+```bash
+# Before compression
+du -sh public/
+# Output: 2.5M    public/
+
+# Generate bundle
+go generate
+
+# After compression (check .gen.go file)
+ls -lh assets.gen.go
+# Output: -rw-r--r--  1 user  staff   256K  assets.gen.go
+
+# Compression ratio: 2.5M → 256K = ~9.7x
+```
+
+### Benchmark Decompression Speed
+
+```go
+package main_test
+
+import (
+    "testing"
+)
+
+func BenchmarkFileOpen(b *testing.B) {
+    for i := 0; i < b.N; i++ {
+        f, err := assets.Open("public/index.html")
+        if err != nil {
+            b.Fatal(err)
+        }
+        f.Close()
+    }
+}
+
+func BenchmarkFileRead(b *testing.B) {
+    f, _ := assets.Open("public/large-file.js")
+    defer f.Close()
+    
+    buf := make([]byte, 1024)
+    b.ResetTimer()
+    
+    for i := 0; i < b.N; i++ {
+        f.Seek(0, 0)
+        f.Read(buf)
+    }
+}
+```
+
+## Best Practices
+
+<AccordionGroup>
+  <Accordion title="Production deployments">
+    ```go
+    //go:generate broccoli -src public -quality=11 -gitignore
+    ```
+    
+    - Use maximum compression (`-quality=11`)
+    - Enable `.gitignore` parsing to exclude development files
+    - Consider optional decompression for large bundles
+  </Accordion>
+
+  <Accordion title="Development workflow">
+    ```go
+    //go:generate broccoli -src public -quality=1
+    ```
+    
+    - Use fastest compression (`-quality=1`)
+    - Don't use optional decompression
+    - Consider using Development mode instead (see [Development Mode guide](/guides/development-mode))
+  </Accordion>
+
+  <Accordion title="CI/CD pipelines">
+    ```go
+    //go:generate broccoli -src public -quality=6 -gitignore
+    ```
+    
+    - Use balanced compression (`-quality=6`)
+    - Keeps CI builds reasonably fast
+    - Still achieves good compression ratio
+  </Accordion>
+
+  <Accordion title="WebAssembly targets">
+    ```go
+    //go:generate broccoli -src wasm -include="*.wasm" -quality=11 -opt
+    ```
+    
+    - Maximum compression for large WASM files
+    - Optional decompression to reduce memory usage
+    - WASM files are already optimized but still benefit from brotli
+  </Accordion>
+</AccordionGroup>
+
+## Real-World Example
+
+A production web application with optimized compression:
+
+```go
+package main
+
+import (
+    "log"
+    "net/http"
+    "os"
+)
+
+// High compression for HTML/CSS/JS (text compresses well)
+//go:generate broccoli -src public -include="*.html,*.css,*.js" -o web -var webAssets -quality=11 -opt -gitignore
+
+// Lower compression for images (already compressed)
+//go:generate broccoli -src public -include="*.jpg,*.png,*.webp" -o images -var imageAssets -quality=4 -gitignore
+
+// Medium compression for fonts
+//go:generate broccoli -src public -include="*.woff2" -o fonts -var fontAssets -quality=6 -gitignore
+
+func main() {
+    // Development mode for local testing
+    if os.Getenv("ENV") == "development" {
+        webAssets.Development(true)
+        imageAssets.Development(true)
+        fontAssets.Development(true)
+    }
+    
+    // Serve all asset types
+    http.Handle("/", webAssets.Serve("public"))
+    http.Handle("/images/", imageAssets.Serve("public"))
+    http.Handle("/fonts/", fontAssets.Serve("public"))
+    
+    log.Println("Server starting on :8080")
+    http.ListenAndServe(":8080", nil)
+}
+```
+
+## Next Steps
+
+<CardGroup cols={2}>
+  <Card title="HTTP Server" icon="server" href="/guides/http-server">
+    Learn how to serve compressed files over HTTP
+  </Card>
+  <Card title="Development Mode" icon="code" href="/guides/development-mode">
+    Use local files for faster development
+  </Card>
+</CardGroup>

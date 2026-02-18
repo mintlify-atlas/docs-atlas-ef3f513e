@@ -1,0 +1,147 @@
+---
+title: Introduction
+description: Embed static files as a virtual filesystem in Go executables using brotli compression
+---
+
+# Broccoli
+
+Broccoli uses [brotli compression](https://github.com/google/brotli) to embed a virtual file system of static files inside Go executables.
+
+## Why Broccoli?
+
+Broccoli stands out from other static asset embedding solutions with its superior compression and flexible architecture:
+
+<CardGroup cols={2}>
+  <Card title="Superior Compression" icon="compress">
+    **13-25% smaller binaries** on average compared to gzip-based solutions thanks to brotli compression algorithm
+  </Card>
+  
+  <Card title="Multiple Source Directories" icon="folder-tree">
+    Bundle files from multiple directories without configuration files—just use `go generate`
+  </Card>
+  
+  <Card title="Optional Decompression" icon="gauge-high">
+    Decompress files lazily on first read to optimize startup time and memory usage
+  </Card>
+  
+  <Card title="WASM Support" icon="cube">
+    Full compatibility with `wasm/js` architecture for WebAssembly projects
+  </Card>
+  
+  <Card title=".gitignore Support" icon="file-slash">
+    Automatically respect existing `.gitignore` rules when bundling assets
+  </Card>
+  
+  <Card title="HTTP File System" icon="server">
+    Implements `http.FileSystem` interface for seamless web server integration
+  </Card>
+  
+  <Card title="No Config Files" icon="code">
+    Pure `go:generate` workflow with command-line options—no YAML or JSON needed
+  </Card>
+  
+  <Card title="Flexible Filtering" icon="filter">
+    Include or exclude files using glob patterns with configurable compression levels (1-11)
+  </Card>
+</CardGroup>
+
+## How It Works
+
+Broccoli operates in two phases:
+
+1. **Build Time**: The `broccoli` CLI tool compresses your static files using brotli and generates a `.gen.go` file containing the embedded filesystem
+2. **Runtime**: Your application uses the generated `Broccoli` object to access files through a standard filesystem interface
+
+```go
+//go:generate broccoli -src=public -o assets
+
+package main
+
+import (
+    "net/http"
+)
+
+func main() {
+    // Serve embedded files over HTTP
+    http.ListenAndServe(":8080", assets.Serve("public"))
+}
+```
+
+## Comparison with Other Tools
+
+### vs. fileb0x
+
+| Feature | fileb0x | Broccoli |
+|---------|---------|----------|
+| Compression | gzip | **brotli (-20% avg.)** |
+| Optional decompression | ✅ | ✅ |
+| Compression levels | ✅ | ✅ (1-11) |
+| Virtual memory FS | ✅ | ✅ |
+| HTTP file system | ✅ | ✅ |
+| Glob support | ✅ | ✅ |
+| Config file | Required | **None needed** |
+| .gitignore support | ❌ | ✅ |
+| WASM support | ❌ | ✅ |
+
+### Performance Benchmarks
+
+Broccoli consistently produces **smaller binary sizes** than alternatives like go-bindata, packr, and esc due to brotli's superior compression ratio.
+
+<Note>
+  See the [benchmarks repository](https://vcs.aletheia.icu/lads/broccoli-bench) for detailed performance comparisons.
+</Note>
+
+## Key Features
+
+### Brotli Compression
+
+Brotli achieves 13-25% better compression than gzip, significantly reducing your binary size while maintaining fast decompression speeds.
+
+### Development Mode
+
+Toggle between embedded and local filesystem during development:
+
+```go
+if os.Getenv("PRODUCTION") == "" {
+    br.Development(true)
+}
+```
+
+### File Walking
+
+Walk through embedded files just like `filepath.Walk`:
+
+```go
+br.Walk("public", func(path string, info os.FileInfo, err error) error {
+    fmt.Println(path)
+    return nil
+})
+```
+
+### HTTP Server Integration
+
+Serve embedded assets over HTTP with one line:
+
+```go
+http.ListenAndServe(":8080", br.Serve("public"))
+```
+
+## Get Started
+
+<CardGroup cols={2}>
+  <Card title="Installation" icon="download" href="/installation">
+    Install Broccoli and set up your development environment
+  </Card>
+  
+  <Card title="Quick Start" icon="rocket" href="/quickstart">
+    Build your first embedded filesystem in 5 minutes
+  </Card>
+</CardGroup>
+
+## License
+
+Broccoli is MIT licensed and maintained by [Aletheia](https://aletheia.icu).
+
+<Tip>
+  For API documentation, visit [GoDoc](https://godoc.org/aletheia.icu/broccoli/fs).
+</Tip>

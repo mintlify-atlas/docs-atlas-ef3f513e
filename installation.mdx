@@ -1,0 +1,245 @@
+---
+title: Installation
+description: Install Broccoli CLI tool and set up your Go project
+---
+
+# Installation
+
+Get up and running with Broccoli in your Go project.
+
+## Prerequisites
+
+Before installing Broccoli, ensure you have:
+
+- **Go 1.11 or later** installed on your system
+- A Go project with Go modules enabled (`go.mod` file)
+
+<Tip>
+  Check your Go version with `go version`
+</Tip>
+
+## Install Broccoli CLI
+
+<Steps>
+  <Step title="Install via go get">
+    Install the Broccoli command-line tool:
+
+    ```bash
+    go get -u aletheia.icu/broccoli
+    ```
+
+    This downloads and compiles the `broccoli` binary to your `$GOPATH/bin` directory.
+
+    <Note>
+      Make sure `$GOPATH/bin` is in your `PATH` environment variable so you can run `broccoli` from anywhere.
+    </Note>
+  </Step>
+
+  <Step title="Verify installation">
+    Confirm Broccoli is installed correctly:
+
+    ```bash
+    broccoli
+    ```
+
+    You should see the usage information:
+
+    ```
+    Usage: broccoli [options]
+
+    Broccoli uses brotli compression to embed a virtual file system in Go executables.
+
+    Options:
+        -src folder[,file,file2]
+            The input files and directories, "public" by default.
+        -o
+            Name of the generated file, follows input by default.
+        -var br
+            Name of the exposed variable, "br" by default.
+        ...
+    ```
+  </Step>
+
+  <Step title="Add Broccoli library dependency">
+    Add the Broccoli filesystem library to your project:
+
+    ```bash
+    go get aletheia.icu/broccoli/fs
+    ```
+
+    This is the runtime library that your application will use to access embedded files.
+  </Step>
+
+  <Step title="Update dependencies">
+    Ensure all dependencies are downloaded:
+
+    ```bash
+    go mod tidy
+    ```
+
+    This will update your `go.mod` and `go.sum` files with the Broccoli dependencies including:
+    - `aletheia.icu/broccoli/fs`
+    - `github.com/andybalholm/brotli` (compression library)
+  </Step>
+</Steps>
+
+## Project Setup
+
+Now that Broccoli is installed, set up your project structure:
+
+<Steps>
+  <Step title="Create assets directory">
+    Create a directory for your static files:
+
+    ```bash
+    mkdir public
+    ```
+
+    You can name this directory anything you want (e.g., `assets`, `static`, `web`, etc.).
+  </Step>
+
+  <Step title="Add static files">
+    Add some files to your assets directory:
+
+    ```bash
+    echo "Hello, World!" > public/index.html
+    echo "body { color: blue; }" > public/styles.css
+    ```
+  </Step>
+
+  <Step title="Add go:generate directive">
+    In your main Go file (e.g., `main.go`), add the `go:generate` directive:
+
+    ```go
+    package main
+
+    //go:generate broccoli -src=public -o assets
+
+    import (
+        "net/http"
+    )
+
+    func main() {
+        http.ListenAndServe(":8080", assets.Serve("public"))
+    }
+    ```
+
+    This tells Go to run `broccoli` when you execute `go generate`.
+  </Step>
+</Steps>
+
+## Configuration Options
+
+Broccoli supports various command-line options to customize the build:
+
+### Basic Options
+
+| Option | Default | Description |
+|--------|---------|-------------|
+| `-src` | `public` | Comma-separated list of input files/directories |
+| `-o` | (input name) | Name of the generated file (without `.gen.go`) |
+| `-var` | `br` | Name of the exported variable in generated code |
+
+### Filtering Options
+
+| Option | Default | Description |
+|--------|---------|-------------|
+| `-include` | (none) | Comma-separated wildcard patterns to include |
+| `-exclude` | (none) | Comma-separated wildcard patterns to exclude |
+| `-gitignore` | `false` | Enable parsing of `.gitignore` files |
+
+### Performance Options
+
+| Option | Default | Description |
+|--------|---------|-------------|
+| `-quality` | `11` | Brotli compression level (1-11, higher = better compression) |
+| `-opt` | `false` | Enable optional decompression (lazy loading) |
+
+### Build Options
+
+| Option | Default | Description |
+|--------|---------|-------------|
+| `-build` | (none) | Build tags for the generated file |
+
+<Warning>
+  The `-include` and `-exclude` options are mutually exclusive. You cannot use both at the same time.
+</Warning>
+
+## Example Configurations
+
+### Bundle multiple directories
+
+```go
+//go:generate broccoli -src=static,templates,images -o assets
+```
+
+### Include only specific file types
+
+```go
+//go:generate broccoli -src=public -include="*.html,*.css,*.js" -o web
+```
+
+### Exclude large files
+
+```go
+//go:generate broccoli -src=assets -exclude="*.mp4,*.zip" -o bundle
+```
+
+### Use .gitignore rules
+
+```go
+//go:generate broccoli -src=public -gitignore -o assets
+```
+
+### Custom variable name
+
+```go
+//go:generate broccoli -src=static -o resources -var resources
+```
+
+### Faster compression for development
+
+```go
+//go:generate broccoli -src=public -quality=6 -o assets
+```
+
+### Lazy loading for large bundles
+
+```go
+//go:generate broccoli -src=public -opt -o assets
+```
+
+## Next Steps
+
+<Card title="Quick Start Tutorial" icon="rocket" href="/quickstart">
+  Follow the quick start guide to build your first embedded filesystem
+</Card>
+
+## Troubleshooting
+
+### broccoli: command not found
+
+If you get this error, ensure `$GOPATH/bin` is in your `PATH`:
+
+```bash
+export PATH=$PATH:$(go env GOPATH)/bin
+```
+
+Add this line to your shell configuration file (`.bashrc`, `.zshrc`, etc.) to make it permanent.
+
+### Module not found errors
+
+If you see module errors when generating, run:
+
+```bash
+go mod tidy
+go generate
+```
+
+### Permission denied
+
+On Unix systems, ensure the broccoli binary is executable:
+
+```bash
+chmod +x $(go env GOPATH)/bin/broccoli
+```

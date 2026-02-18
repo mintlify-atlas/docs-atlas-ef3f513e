@@ -1,0 +1,276 @@
+---
+title: "File"
+description: "The File type represents a bundled asset in the Broccoli virtual file system"
+---
+
+## Overview
+
+The `File` type represents a bundled asset in the Broccoli virtual file system. Files are automatically decompressed when opened and provide standard file operations.
+
+<Note>
+  Files should never be created explicitly. They are accessed via `Broccoli.Open()` and created internally by the broccoli tool.
+</Note>
+
+## Type Definition
+
+```go
+type File struct {
+    compressed bool
+    
+    Data  []byte
+    Fpath string
+    Fname string
+    Fsize int64
+    Ftime int64
+    
+    buffer *bytes.Buffer
+    br     *Broccoli
+    rdi    int // read dir index
+}
+```
+
+## File Operations
+
+### Read
+
+Reads the next len(p) bytes from the buffer or until the buffer is drained.
+
+```go
+func (f *File) Read(b []byte) (int, error)
+```
+
+<ParamField path="b" type="[]byte" required>
+  Byte slice to read data into.
+</ParamField>
+
+<ResponseField name="int" type="int">
+  The number of bytes read.
+</ResponseField>
+
+<ResponseField name="error" type="error">
+  Returns `io.EOF` if the buffer is drained (unless len(p) is zero), `os.ErrClosed` if the file is closed, or nil on success.
+</ResponseField>
+
+**Example:**
+
+```go
+file, err := br.Open("data.txt")
+if err != nil {
+    log.Fatal(err)
+}
+defer file.Close()
+
+buf := make([]byte, 1024)
+n, err := file.Read(buf)
+if err != nil && err != io.EOF {
+    log.Fatal(err)
+}
+fmt.Printf("Read %d bytes\n", n)
+```
+
+---
+
+### Seek
+
+Sets the offset for the next Read on the file to offset, interpreted according to whence.
+
+```go
+func (f *File) Seek(offset int64, whence int) (int64, error)
+```
+
+<ParamField path="offset" type="int64" required>
+  The offset to seek to.
+</ParamField>
+
+<ParamField path="whence" type="int" required>
+  Determines how the offset is interpreted:
+  - `0` (io.SeekStart): relative to the origin of the file
+  - `1` (io.SeekCurrent): relative to the current offset
+  - `2` (io.SeekEnd): relative to the end of the file
+</ParamField>
+
+<ResponseField name="int64" type="int64">
+  The new offset position in the file.
+</ResponseField>
+
+<ResponseField name="error" type="error">
+  Returns an error if the offset is invalid, the whence value is bad, or the file is closed.
+</ResponseField>
+
+**Example:**
+
+```go
+file, _ := br.Open("data.txt")
+defer file.Close()
+
+// Seek to beginning
+file.Seek(0, io.SeekStart)
+
+// Seek 100 bytes forward from current position
+file.Seek(100, io.SeekCurrent)
+
+// Seek to 10 bytes before end
+file.Seek(10, io.SeekEnd)
+```
+
+---
+
+### Close
+
+Clears the dedicated file buffer and releases resources.
+
+```go
+func (f *File) Close() error
+```
+
+<ResponseField name="error" type="error">
+  Returns `os.ErrClosed` if the file is already closed, or nil on success.
+</ResponseField>
+
+**Example:**
+
+```go
+file, err := br.Open("data.txt")
+if err != nil {
+    log.Fatal(err)
+}
+defer file.Close()
+
+// Use file...
+```
+
+---
+
+### Readdir
+
+Reads the contents of the directory associated with file and returns a slice of FileInfo values.
+
+```go
+func (f *File) Readdir(count int) ([]os.FileInfo, error)
+```
+
+<ParamField path="count" type="int" required>
+  The maximum number of entries to return:
+  - If `n > 0`: returns at most n FileInfo structures
+  - If `n <= 0`: returns all FileInfo from the directory
+</ParamField>
+
+<ResponseField name="[]os.FileInfo" type="[]os.FileInfo">
+  A slice of FileInfo values in directory order.
+</ResponseField>
+
+<ResponseField name="error" type="error">
+  Returns `os.ErrInvalid` if the file is not a directory, `io.EOF` at the end of the directory, `io.ErrUnexpectedEOF` if called after reaching the end, or `nil` when successfully reading all entries.
+</ResponseField>
+
+<Note>
+  Subsequent calls on the same file will yield further FileInfos. The files are returned in directory order.
+</Note>
+
+**Example:**
+
+```go
+dir, err := br.Open("assets")
+if err != nil {
+    log.Fatal(err)
+}
+defer dir.Close()
+
+// Read all entries
+entries, err := dir.Readdir(-1)
+if err != nil {
+    log.Fatal(err)
+}
+
+for _, entry := range entries {
+    fmt.Printf("%s (%d bytes)\n", entry.Name(), entry.Size())
+}
+```
+
+---
+
+### Stat
+
+Returns a FileInfo describing this file.
+
+```go
+func (f *File) Stat() (os.FileInfo, error)
+```
+
+<ResponseField name="os.FileInfo" type="os.FileInfo">
+  File information including name, size, mode, and modification time.
+</ResponseField>
+
+<ResponseField name="error" type="error">
+  Returns an error if the stat operation fails.
+</ResponseField>
+
+**Example:**
+
+```go
+file, _ := br.Open("data.txt")
+defer file.Close()
+
+info, err := file.Stat()
+if err != nil {
+    log.Fatal(err)
+}
+fmt.Printf("Name: %s\n", info.Name())
+fmt.Printf("Size: %d\n", info.Size())
+```
+
+## FileInfo Implementation
+
+The File type also implements `os.FileInfo` interface:
+
+### Name
+
+Returns the basename of the file.
+
+```go
+func (f *File) Name() string
+```
+
+### Size
+
+Returns the size of the file in bytes.
+
+```go
+func (f *File) Size() int64
+```
+
+### Mode
+
+Returns the file mode of the file.
+
+```go
+func (f *File) Mode() os.FileMode
+```
+
+<Note>
+  Returns `os.ModeDir` for directories, `0444` (read-only) otherwise.
+</Note>
+
+### ModTime
+
+Returns the time the file was last modified.
+
+```go
+func (f *File) ModTime() time.Time
+```
+
+### IsDir
+
+Tells whether the file is a directory.
+
+```go
+func (f *File) IsDir() bool
+```
+
+### Sys
+
+Returns the underlying data source (always nil).
+
+```go
+func (f *File) Sys() interface{}
+```

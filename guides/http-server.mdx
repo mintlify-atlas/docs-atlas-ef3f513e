@@ -1,0 +1,527 @@
+---
+title: HTTP Server
+description: Serve embedded static files over HTTP with Broccoli's built-in server
+---
+
+## Overview
+
+Broccoli provides a built-in HTTP server through the `Serve()` method, making it easy to serve your embedded files with Go's standard `net/http` package.
+
+## Basic Server Setup
+
+<Steps>
+  <Step title="Generate your bundle">
+    ```go
+    package main
+
+    import "net/http"
+
+    //go:generate broccoli -src public -o assets
+    ```
+  </Step>
+
+  <Step title="Use Serve() as HTTP handler">
+    ```go
+    func main() {
+        http.ListenAndServe(":8080", assets.Serve("public"))
+    }
+    ```
+  </Step>
+
+  <Step title="Run your server">
+    ```bash
+    go generate
+    go run .
+    # Server listening on http://localhost:8080
+    ```
+  </Step>
+</Steps>
+
+<Note>
+The `Serve()` method returns an `http.Handler`, which is compatible with Go's standard HTTP server and most web frameworks.
+</Note>
+
+## How Serve() Works
+
+The `Serve()` method wraps your Broccoli filesystem as an `http.FileServer`:
+
+```go
+func (br *Broccoli) Serve(dir string) http.Handler {
+    srv := &Server{
+        br:     br,
+        prefix: strings.Trim(dir, "/"),
+    }
+    return http.FileServer(srv)
+}
+```
+
+<Tabs>
+  <Tab title="Request Handling">
+    When a request comes in:
+    
+    1. The URL path is extracted (e.g., `/style.css`)
+    2. It's combined with your specified prefix (e.g., `public`)
+    3. Broccoli looks up `public/style.css` in the bundle
+    4. The file is decompressed and served
+  </Tab>
+
+  <Tab title="Content Types">
+    `http.FileServer` automatically sets the correct `Content-Type` header based on file extension:
+    
+    - `.html` → `text/html`
+    - `.css` → `text/css`
+    - `.js` → `application/javascript`
+    - `.json` → `application/json`
+    - `.png` → `image/png`
+    - And more...
+  </Tab>
+
+  <Tab title="Directory Listings">
+    If a directory is requested, `http.FileServer` automatically:
+    
+    - Serves `index.html` if it exists
+    - Returns a 404 if no index exists
+    
+    <Warning>
+    Directory listing is disabled by default for security.
+    </Warning>
+  </Tab>
+</Tabs>
+
+## Common Server Patterns
+
+### Pattern 1: Single Route
+
+Serve all static files on the root path:
+
+```go
+package main
+
+import (
+    "log"
+    "net/http"
+)
+
+//go:generate broccoli -src public -o assets
+
+func main() {
+    http.ListenAndServe(":8080", assets.Serve("public"))
+}
+```
+
+**Example requests:**
+- `GET /` → `public/index.html`
+- `GET /style.css` → `public/style.css`
+- `GET /js/app.js` → `public/js/app.js`
+
+### Pattern 2: Prefixed Route
+
+Serve static files under a specific path:
+
+```go
+package main
+
+import (
+    "log"
+    "net/http"
+)
+
+//go:generate broccoli -src public -o assets
+
+func main() {
+    // Serve static files at /static/*
+    http.Handle("/static/", http.StripPrefix("/static", assets.Serve("public")))
+    
+    // Your API routes
+    http.HandleFunc("/api/users", handleUsers)
+    
+    log.Println("Server starting on :8080")
+    http.ListenAndServe(":8080", nil)
+}
+
+func handleUsers(w http.ResponseWriter, r *http.Request) {
+    w.Write([]byte("API response"))
+}
+```
+
+**Example requests:**
+- `GET /static/style.css` → `public/style.css`
+- `GET /api/users` → API handler
+
+### Pattern 3: Multiple Bundles
+
+Serve different bundles on different routes:
+
+```go
+package main
+
+import (
+    "log"
+    "net/http"
+)
+
+//go:generate broccoli -src public -o public_assets -var publicAssets
+//go:generate broccoli -src admin -o admin_assets -var adminAssets
+
+func main() {
+    // Public website
+    http.Handle("/", publicAssets.Serve("public"))
+    
+    // Admin dashboard
+    http.Handle("/admin/", http.StripPrefix("/admin", adminAssets.Serve("admin")))
+    
+    log.Println("Server starting on :8080")
+    http.ListenAndServe(":8080", nil)
+}
+```
+
+### Pattern 4: SPA with Fallback
+
+Serve a Single Page Application with fallback to `index.html`:
+
+```go
+package main
+
+import (
+    "log"
+    "net/http"
+    "os"
+)
+
+//go:generate broccoli -src dist -o assets
+
+func main() {
+    http.HandleFunc("/", spaHandler)
+    
+    log.Println("SPA server starting on :8080")
+    http.ListenAndServe(":8080", nil)
+}
+
+func spaHandler(w http.ResponseWriter, r *http.Request) {
+    path := "dist" + r.URL.Path
+    
+    // Try to serve the requested file
+    if _, err := assets.Stat(path); err == nil {
+        assets.Serve("dist").ServeHTTP(w, r)
+        return
+    }
+    
+    // Fall back to index.html for client-side routing
+    if _, err := assets.Stat("dist/index.html"); err == nil {
+        r.URL.Path = "/"
+        assets.Serve("dist").ServeHTTP(w, r)
+        return
+    }
+    
+    http.NotFound(w, r)
+}
+```
+
+<Info>
+This pattern is essential for React, Vue, Angular, and other SPAs that use client-side routing.
+</Info>
+
+## Middleware Integration
+
+Broccoli's `Serve()` returns a standard `http.Handler`, so it works with any middleware:
+
+<Tabs>
+  <Tab title="Logging">
+    ```go
+    func loggingMiddleware(next http.Handler) http.Handler {
+        return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+            log.Printf("%s %s", r.Method, r.URL.Path)
+            next.ServeHTTP(w, r)
+        })
+    }
+    
+    func main() {
+        handler := assets.Serve("public")
+        http.ListenAndServe(":8080", loggingMiddleware(handler))
+    }
+    ```
+  </Tab>
+
+  <Tab title="Compression">
+    ```go
+    import "github.com/nytimes/gziphandler"
+    
+    func main() {
+        handler := assets.Serve("public")
+        compressed := gziphandler.GzipHandler(handler)
+        http.ListenAndServe(":8080", compressed)
+    }
+    ```
+    
+    <Note>
+    Files are already brotli-compressed in the bundle but decompressed when served. Adding HTTP compression helps for HTTP/1.1 clients.
+    </Note>
+  </Tab>
+
+  <Tab title="CORS">
+    ```go
+    import "github.com/rs/cors"
+    
+    func main() {
+        handler := assets.Serve("public")
+        
+        c := cors.New(cors.Options{
+            AllowedOrigins: []string{"https://example.com"},
+            AllowedMethods: []string{"GET", "HEAD"},
+        })
+        
+        http.ListenAndServe(":8080", c.Handler(handler))
+    }
+    ```
+  </Tab>
+
+  <Tab title="Authentication">
+    ```go
+    func authMiddleware(next http.Handler) http.Handler {
+        return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+            token := r.Header.Get("Authorization")
+            if !isValidToken(token) {
+                http.Error(w, "Unauthorized", http.StatusUnauthorized)
+                return
+            }
+            next.ServeHTTP(w, r)
+        })
+    }
+    
+    func main() {
+        // Public assets (no auth)
+        http.Handle("/public/", assets.Serve("public"))
+        
+        // Protected assets (with auth)
+        protected := adminAssets.Serve("admin")
+        http.Handle("/admin/", authMiddleware(protected))
+        
+        http.ListenAndServe(":8080", nil)
+    }
+    ```
+  </Tab>
+</Tabs>
+
+## Performance Considerations
+
+### Caching Headers
+
+Add cache headers for better performance:
+
+```go
+func cacheMiddleware(next http.Handler) http.Handler {
+    return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+        // Cache static assets for 1 year
+        if strings.HasPrefix(r.URL.Path, "/static/") {
+            w.Header().Set("Cache-Control", "public, max-age=31536000, immutable")
+        }
+        next.ServeHTTP(w, r)
+    })
+}
+
+func main() {
+    handler := assets.Serve("public")
+    http.ListenAndServe(":8080", cacheMiddleware(handler))
+}
+```
+
+### ETag Support
+
+`http.FileServer` automatically generates ETags for efficient caching:
+
+```bash
+# First request
+curl -I http://localhost:8080/style.css
+# Response:
+# HTTP/1.1 200 OK
+# ETag: "5f3c2e1a"
+# Last-Modified: Mon, 18 May 2024 12:00:00 GMT
+
+# Subsequent request with ETag
+curl -H 'If-None-Match: "5f3c2e1a"' -I http://localhost:8080/style.css
+# Response:
+# HTTP/1.1 304 Not Modified
+```
+
+## Real-World Examples
+
+### Example 1: Production Web Server
+
+```go
+package main
+
+import (
+    "log"
+    "net/http"
+    "os"
+    "time"
+)
+
+//go:generate broccoli -src public -o assets -quality=11 -opt -gitignore
+
+func main() {
+    // Enable development mode for local testing
+    if os.Getenv("ENV") == "development" {
+        assets.Development(true)
+    }
+    
+    // Configure server
+    srv := &http.Server{
+        Addr:           ":8080",
+        Handler:        assets.Serve("public"),
+        ReadTimeout:    10 * time.Second,
+        WriteTimeout:   10 * time.Second,
+        MaxHeaderBytes: 1 << 20,
+    }
+    
+    log.Printf("Server starting on %s", srv.Addr)
+    if err := srv.ListenAndServe(); err != nil {
+        log.Fatal(err)
+    }
+}
+```
+
+### Example 2: API + Static Files
+
+```go
+package main
+
+import (
+    "encoding/json"
+    "log"
+    "net/http"
+)
+
+//go:generate broccoli -src frontend/dist -o assets
+
+type Response struct {
+    Message string `json:"message"`
+}
+
+func main() {
+    // API routes
+    http.HandleFunc("/api/health", healthCheck)
+    http.HandleFunc("/api/data", getData)
+    
+    // Static files (SPA)
+    http.Handle("/", assets.Serve("frontend/dist"))
+    
+    log.Println("API + Static server on :8080")
+    http.ListenAndServe(":8080", nil)
+}
+
+func healthCheck(w http.ResponseWriter, r *http.Request) {
+    w.Header().Set("Content-Type", "application/json")
+    json.NewEncoder(w).Encode(Response{Message: "OK"})
+}
+
+func getData(w http.ResponseWriter, r *http.Request) {
+    w.Header().Set("Content-Type", "application/json")
+    json.NewEncoder(w).Encode(Response{Message: "Data response"})
+}
+```
+
+### Example 3: Multi-Tenant Server
+
+```go
+package main
+
+import (
+    "fmt"
+    "log"
+    "net/http"
+)
+
+//go:generate broccoli -src themes/default -o theme_default -var defaultTheme
+//go:generate broccoli -src themes/dark -o theme_dark -var darkTheme
+
+func main() {
+    http.HandleFunc("/", tenantHandler)
+    
+    log.Println("Multi-tenant server on :8080")
+    http.ListenAndServe(":8080", nil)
+}
+
+func tenantHandler(w http.ResponseWriter, r *http.Request) {
+    // Determine tenant from subdomain or header
+    theme := r.Header.Get("X-Theme")
+    
+    var handler http.Handler
+    switch theme {
+    case "dark":
+        handler = darkTheme.Serve("themes/dark")
+    default:
+        handler = defaultTheme.Serve("themes/default")
+    }
+    
+    handler.ServeHTTP(w, r)
+}
+```
+
+## Testing Your Server
+
+```go
+package main_test
+
+import (
+    "io/ioutil"
+    "net/http/httptest"
+    "testing"
+)
+
+func TestServer(t *testing.T) {
+    // Create test server
+    srv := httptest.NewServer(assets.Serve("public"))
+    defer srv.Close()
+    
+    // Test index.html
+    resp, err := srv.Client().Get(srv.URL + "/index.html")
+    if err != nil {
+        t.Fatal(err)
+    }
+    defer resp.Body.Close()
+    
+    // Verify response
+    if resp.StatusCode != 200 {
+        t.Errorf("Expected 200, got %d", resp.StatusCode)
+    }
+    
+    // Check content
+    body, _ := ioutil.ReadAll(resp.Body)
+    if len(body) == 0 {
+        t.Error("Empty response body")
+    }
+    
+    // Verify content type
+    ct := resp.Header.Get("Content-Type")
+    if ct != "text/html; charset=utf-8" {
+        t.Errorf("Expected text/html, got %s", ct)
+    }
+}
+
+func TestNotFound(t *testing.T) {
+    srv := httptest.NewServer(assets.Serve("public"))
+    defer srv.Close()
+    
+    resp, err := srv.Client().Get(srv.URL + "/nonexistent.html")
+    if err != nil {
+        t.Fatal(err)
+    }
+    defer resp.Body.Close()
+    
+    if resp.StatusCode != 404 {
+        t.Errorf("Expected 404, got %d", resp.StatusCode)
+    }
+}
+```
+
+## Next Steps
+
+<CardGroup cols={2}>
+  <Card title="Development Mode" icon="code" href="/guides/development-mode">
+    Learn how to use Development mode for rapid iteration
+  </Card>
+  <Card title="Compression" icon="compress" href="/guides/compression">
+    Optimize compression for HTTP serving
+  </Card>
+</CardGroup>

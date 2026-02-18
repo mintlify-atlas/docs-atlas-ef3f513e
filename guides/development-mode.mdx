@@ -1,0 +1,523 @@
+---
+title: Development Mode
+description: Use Development mode to serve files from disk during development for faster iteration
+---
+
+## Overview
+
+Development mode allows Broccoli to read files directly from your local filesystem instead of the embedded bundle. This is invaluable during development when you're frequently modifying static files and don't want to regenerate the bundle every time.
+
+<Info>
+With Development mode enabled, your application behaves as if it's using `http.Dir()` instead of the embedded files, giving you instant feedback on file changes.
+</Info>
+
+## Enabling Development Mode
+
+Use the `Development()` method to toggle development mode:
+
+```go
+package main
+
+import "aletheia.icu/broccoli/fs"
+
+//go:generate broccoli -src public -o assets
+
+func init() {
+    // Enable development mode
+    assets.Development(true)
+}
+
+func main() {
+    // Your application code
+}
+```
+
+<Warning>
+**Development mode should only be enabled in development environments.** Files are read from disk on every request, which is slower and requires the source files to be present.
+</Warning>
+
+## How It Works
+
+When Development mode is enabled:
+
+<Steps>
+  <Step title="File Operations Are Redirected">
+    All calls to `Open()`, `Stat()`, and `Walk()` bypass the embedded bundle and use the local filesystem instead.
+  </Step>
+
+  <Step title="Paths Are Used Directly">
+    The paths you specify (e.g., `"public/index.html"`) are opened directly as filesystem paths relative to your working directory.
+  </Step>
+
+  <Step title="Changes Are Immediate">
+    Any changes you make to files on disk are immediately visible in your running application.
+  </Step>
+</Steps>
+
+<Tabs>
+  <Tab title="Production">
+    ```go
+    // Development mode OFF (default)
+    f, err := assets.Open("public/style.css")
+    // Reads from embedded bundle (brotli-compressed)
+    ```
+  </Tab>
+
+  <Tab title="Development">
+    ```go
+    // Development mode ON
+    assets.Development(true)
+    f, err := assets.Open("public/style.css")
+    // Reads from disk: ./public/style.css
+    ```
+  </Tab>
+</Tabs>
+
+## Environment-Based Configuration
+
+The most common pattern is to enable Development mode based on environment variables:
+
+<CodeGroup>
+```go Environment Variable
+package main
+
+import (
+    "os"
+    "aletheia.icu/broccoli/fs"
+)
+
+//go:generate broccoli -src public -o assets
+
+func init() {
+    if os.Getenv("ENV") == "development" {
+        assets.Development(true)
+    }
+}
+```
+
+```go Production Check
+package main
+
+import (
+    "os"
+    "aletheia.icu/broccoli/fs"
+)
+
+//go:generate broccoli -src public -o assets
+
+func init() {
+    // Enable dev mode unless in production
+    if os.Getenv("PRODUCTION") == "" {
+        assets.Development(true)
+    }
+}
+```
+
+```go Go Build Tags
+//go:build dev
+
+package main
+
+func init() {
+    assets.Development(true)
+}
+```
+</CodeGroup>
+
+### Running with Environment Variables
+
+```bash
+# Development mode (reads from disk)
+ENV=development go run .
+
+# Production mode (reads from bundle)
+ENV=production go run .
+
+# Or using build tags
+go run -tags dev .
+```
+
+## Use Cases
+
+### Use Case 1: Frontend Development
+
+Develop frontend assets without rebuilding:
+
+```go
+package main
+
+import (
+    "log"
+    "net/http"
+    "os"
+)
+
+//go:generate broccoli -src frontend/dist -o assets
+
+func main() {
+    // Enable dev mode for local development
+    if os.Getenv("ENV") != "production" {
+        assets.Development(true)
+        log.Println("⚠️  Development mode: serving files from disk")
+    }
+    
+    http.ListenAndServe(":8080", assets.Serve("frontend/dist"))
+}
+```
+
+**Workflow:**
+1. Start your Go server: `ENV=development go run .`
+2. Edit HTML/CSS/JS files in `frontend/dist/`
+3. Refresh browser to see changes
+4. No need to restart server or run `go generate`
+
+### Use Case 2: Template Iteration
+
+Rapidly iterate on HTML templates:
+
+```go
+package main
+
+import (
+    "html/template"
+    "io/ioutil"
+    "log"
+    "net/http"
+    "os"
+)
+
+//go:generate broccoli -src templates -o tmpl
+
+var templates *template.Template
+
+func init() {
+    if os.Getenv("DEV") == "true" {
+        tmpl.Development(true)
+    }
+}
+
+func loadTemplates() error {
+    // In dev mode, templates are always read fresh from disk
+    f, err := tmpl.Open("templates/index.html")
+    if err != nil {
+        return err
+    }
+    defer f.Close()
+    
+    data, err := ioutil.ReadAll(f)
+    if err != nil {
+        return err
+    }
+    
+    templates, err = template.New("index").Parse(string(data))
+    return err
+}
+
+func handler(w http.ResponseWriter, r *http.Request) {
+    // Reload templates on each request in dev mode
+    if os.Getenv("DEV") == "true" {
+        if err := loadTemplates(); err != nil {
+            http.Error(w, err.Error(), 500)
+            return
+        }
+    }
+    
+    templates.Execute(w, nil)
+}
+```
+
+### Use Case 3: Hot Reload Server
+
+Build a development server with automatic reload:
+
+```go
+package main
+
+import (
+    "log"
+    "net/http"
+    "os"
+    "path/filepath"
+    "time"
+)
+
+//go:generate broccoli -src public -o assets
+
+func main() {
+    isDev := os.Getenv("ENV") == "development"
+    
+    if isDev {
+        assets.Development(true)
+        go watchFiles()
+        log.Println("🔥 Hot reload enabled")
+    }
+    
+    http.ListenAndServe(":8080", assets.Serve("public"))
+}
+
+func watchFiles() {
+    var lastMod time.Time
+    
+    for {
+        time.Sleep(1 * time.Second)
+        
+        filepath.Walk("public", func(path string, info os.FileInfo, err error) error {
+            if err != nil {
+                return err
+            }
+            
+            if !info.IsDir() && info.ModTime().After(lastMod) {
+                log.Printf("📝 File changed: %s", path)
+                lastMod = info.ModTime()
+            }
+            return nil
+        })
+    }
+}
+```
+
+## Conditional Asset Processing
+
+Process assets differently in development vs. production:
+
+```go
+package main
+
+import (
+    "log"
+    "os"
+    "strings"
+)
+
+//go:generate broccoli -src public -o assets
+
+func init() {
+    assets.Development(os.Getenv("ENV") == "development")
+}
+
+func loadCSS() string {
+    var cssFiles []string
+    
+    assets.Walk("public/css", func(path string, info os.FileInfo, err error) error {
+        if err != nil {
+            return err
+        }
+        
+        if !info.IsDir() && strings.HasSuffix(path, ".css") {
+            if os.Getenv("ENV") == "development" {
+                // In dev: serve files individually for debugging
+                cssFiles = append(cssFiles, path)
+            } else {
+                // In prod: bundle is already optimized
+                cssFiles = append(cssFiles, path)
+            }
+        }
+        return nil
+    })
+    
+    return strings.Join(cssFiles, "\n")
+}
+```
+
+## Best Practices
+
+<AccordionGroup>
+  <Accordion title="Always check environment">
+    ```go
+    // ❌ Bad: always in dev mode
+    func init() {
+        assets.Development(true)
+    }
+    
+    // ✅ Good: conditional based on environment
+    func init() {
+        if os.Getenv("ENV") == "development" {
+            assets.Development(true)
+        }
+    }
+    ```
+  </Accordion>
+
+  <Accordion title="Log the mode">
+    ```go
+    func init() {
+        devMode := os.Getenv("ENV") == "development"
+        assets.Development(devMode)
+        
+        if devMode {
+            log.Println("⚠️  Development mode enabled - serving from disk")
+        } else {
+            log.Println("✓ Production mode - serving from embedded bundle")
+        }
+    }
+    ```
+    
+    Makes it clear which mode is active.
+  </Accordion>
+
+  <Accordion title="Consider multiple bundles">
+    ```go
+    func init() {
+        isDev := os.Getenv("ENV") == "development"
+        
+        // Enable dev mode for all bundles
+        assets.Development(isDev)
+        templates.Development(isDev)
+        images.Development(isDev)
+    }
+    ```
+    
+    Don't forget to enable it for all your Broccoli bundles.
+  </Accordion>
+
+  <Accordion title="Use with Docker">
+    ```dockerfile
+    # Dockerfile.dev
+    FROM golang:1.21
+    
+    WORKDIR /app
+    
+    # Mount source files as volume
+    VOLUME /app/public
+    
+    ENV ENV=development
+    
+    CMD ["go", "run", "."]
+    ```
+    
+    ```bash
+    # Run with volume mount
+    docker run -v $(pwd)/public:/app/public -e ENV=development myapp
+    ```
+  </Accordion>
+</AccordionGroup>
+
+## Development vs. Production
+
+| Feature | Development Mode | Production Mode |
+|---------|-----------------|----------------|
+| File source | Filesystem | Embedded bundle |
+| Hot reload | ✅ Yes | ❌ No |
+| Build required | ❌ No | ✅ Yes |
+| Performance | Slower (disk I/O) | Faster (memory) |
+| Binary size | Same | Same |
+| Deploy files | ✅ Required | ❌ Not required |
+
+## Troubleshooting
+
+<AccordionGroup>
+  <Accordion title="Files not updating">
+    **Problem:** Changes to files aren't reflected in the application.
+    
+    **Solution:** Verify development mode is enabled:
+    ```go
+    func init() {
+        log.Printf("Dev mode: %v", os.Getenv("ENV") == "development")
+        if os.Getenv("ENV") == "development" {
+            assets.Development(true)
+        }
+    }
+    ```
+  </Accordion>
+
+  <Accordion title="File not found errors">
+    **Problem:** `os.ErrNotExist` errors in development mode.
+    
+    **Solution:** Ensure paths are correct relative to your working directory:
+    ```go
+    // If your structure is:
+    // .
+    // ├── main.go
+    // └── public/
+    //     └── index.html
+    
+    // Use:
+    assets.Open("public/index.html") // ✅ Correct
+    
+    // Not:
+    assets.Open("index.html") // ❌ Wrong
+    ```
+  </Accordion>
+
+  <Accordion title="Production accidentally using dev mode">
+    **Problem:** Production build is slower and requires source files.
+    
+    **Solution:** Double-check environment variable is not set:
+    ```bash
+    # Ensure ENV is not set to "development"
+    unset ENV
+    go build
+    ./myapp
+    ```
+  </Accordion>
+</AccordionGroup>
+
+## Complete Example
+
+A production-ready application with proper development mode setup:
+
+```go
+package main
+
+import (
+    "flag"
+    "log"
+    "net/http"
+    "os"
+)
+
+//go:generate broccoli -src public -o assets -quality=11 -gitignore
+
+var (
+    port    = flag.String("port", "8080", "Server port")
+    devMode = flag.Bool("dev", false, "Enable development mode")
+)
+
+func init() {
+    flag.Parse()
+    
+    // Check multiple sources for dev mode
+    isDev := *devMode || os.Getenv("ENV") == "development" || os.Getenv("DEV") == "true"
+    
+    if isDev {
+        assets.Development(true)
+        log.Println("⚠️  DEVELOPMENT MODE: Serving files from disk")
+        log.Println("   Changes to public/ will be immediately visible")
+    } else {
+        log.Println("✓ PRODUCTION MODE: Serving from embedded bundle")
+    }
+}
+
+func main() {
+    handler := assets.Serve("public")
+    
+    addr := ":" + *port
+    log.Printf("Server starting on http://localhost%s", addr)
+    
+    if err := http.ListenAndServe(addr, handler); err != nil {
+        log.Fatal(err)
+    }
+}
+```
+
+**Usage:**
+```bash
+# Development: read from disk
+go run . -dev
+# or
+ENV=development go run .
+
+# Production: use embedded bundle
+go run .
+```
+
+## Next Steps
+
+<CardGroup cols={2}>
+  <Card title="HTTP Server" icon="server" href="/guides/http-server">
+    Learn more about serving files over HTTP
+  </Card>
+  <Card title="Basic Usage" icon="book" href="/guides/basic-usage">
+    Review basic Broccoli concepts
+  </Card>
+</CardGroup>

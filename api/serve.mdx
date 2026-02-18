@@ -1,0 +1,245 @@
+---
+title: "Server"
+description: "The Server type provides HTTP serving functionality for Broccoli"
+---
+
+## Overview
+
+The `Server` type implements `http.FileSystem` and provides access to the Broccoli file system content with a specified directory prefix. It's designed to be used as an HTTP handler for serving static files.
+
+## Type Definition
+
+```go
+type Server struct {
+    br     *Broccoli
+    prefix string
+}
+```
+
+## Creating a Server
+
+Servers are created using the `Broccoli.Serve()` method:
+
+```go
+func (br *Broccoli) Serve(dir string) http.Handler
+```
+
+<ParamField path="dir" type="string" required>
+  The directory prefix to serve files from. Leading and trailing slashes are automatically trimmed.
+</ParamField>
+
+<ResponseField name="http.Handler" type="http.Handler">
+  An HTTP handler that serves files from the virtual file system.
+</ResponseField>
+
+## Methods
+
+### Open
+
+Opens the named file for reading. The filepath is prepended with the Server's prefix.
+
+```go
+func (s *Server) Open(filepath string) (http.File, error)
+```
+
+<ParamField path="filepath" type="string" required>
+  The path to the file relative to the server's prefix.
+</ParamField>
+
+<ResponseField name="http.File" type="http.File">
+  The opened file that implements the http.File interface.
+</ResponseField>
+
+<ResponseField name="error" type="error">
+  Returns an error if the file cannot be opened or does not exist.
+</ResponseField>
+
+<Note>
+  The Server automatically combines the prefix with the requested filepath, so you don't need to include the prefix in your requests.
+</Note>
+
+## Usage Examples
+
+### Basic HTTP Server
+
+Serve static files from a bundled directory:
+
+```go
+package main
+
+import (
+    "log"
+    "net/http"
+    "myapp/assets"
+)
+
+func main() {
+    // Serve files from the "public" directory in the bundle
+    http.ListenAndServe(":80", assets.Assets.Serve("public"))
+}
+```
+
+### With HTTP Router
+
+Use Server with a custom router and path prefix:
+
+```go
+package main
+
+import (
+    "log"
+    "net/http"
+    "myapp/assets"
+)
+
+func main() {
+    mux := http.NewServeMux()
+    
+    // Serve static assets at /static/
+    mux.Handle("/static/", 
+        http.StripPrefix("/static/", assets.Assets.Serve("public")))
+    
+    // Other routes
+    mux.HandleFunc("/", homeHandler)
+    mux.HandleFunc("/api/", apiHandler)
+    
+    log.Fatal(http.ListenAndServe(":8080", mux))
+}
+```
+
+### Multiple Static Directories
+
+Serve different bundled directories at different paths:
+
+```go
+package main
+
+import (
+    "log"
+    "net/http"
+    "myapp/assets"
+)
+
+func main() {
+    mux := http.NewServeMux()
+    
+    // Serve CSS files
+    mux.Handle("/css/", 
+        http.StripPrefix("/css/", assets.Assets.Serve("css")))
+    
+    // Serve JavaScript files
+    mux.Handle("/js/", 
+        http.StripPrefix("/js/", assets.Assets.Serve("js")))
+    
+    // Serve images
+    mux.Handle("/images/", 
+        http.StripPrefix("/images/", assets.Assets.Serve("images")))
+    
+    log.Fatal(http.ListenAndServe(":8080", mux))
+}
+```
+
+### With Middleware
+
+Add caching headers and other middleware:
+
+```go
+package main
+
+import (
+    "log"
+    "net/http"
+    "myapp/assets"
+)
+
+func cacheMiddleware(next http.Handler) http.Handler {
+    return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+        w.Header().Set("Cache-Control", "public, max-age=31536000")
+        next.ServeHTTP(w, r)
+    })
+}
+
+func main() {
+    handler := cacheMiddleware(assets.Assets.Serve("public"))
+    log.Fatal(http.ListenAndServe(":8080", handler))
+}
+```
+
+### Development Mode
+
+Serve files from local filesystem during development:
+
+```go
+package main
+
+import (
+    "log"
+    "net/http"
+    "os"
+    "myapp/assets"
+)
+
+func main() {
+    // Enable development mode for local file system access
+    if os.Getenv("ENV") == "development" {
+        assets.Assets.Development(true)
+    }
+    
+    // Server will use local files in dev, bundled files in production
+    http.ListenAndServe(":8080", assets.Assets.Serve("public"))
+}
+```
+
+### SPA (Single Page Application) Server
+
+Serve a React/Vue/Angular app with fallback to index.html:
+
+```go
+package main
+
+import (
+    "log"
+    "net/http"
+    "myapp/assets"
+)
+
+func spaHandler(fs http.Handler) http.Handler {
+    return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+        // Try to serve the requested file
+        fs.ServeHTTP(w, r)
+        
+        // If file not found, serve index.html
+        // (This is a simplified example; production code should check status)
+    })
+}
+
+func main() {
+    handler := spaHandler(assets.Assets.Serve("dist"))
+    log.Fatal(http.ListenAndServe(":8080", handler))
+}
+```
+
+## Features
+
+- **Automatic Content-Type Detection**: The http.FileServer automatically sets the correct Content-Type header based on file extension
+- **Directory Listing**: Disabled by default for security
+- **Range Requests**: Supports partial content requests (HTTP 206)
+- **ETag Support**: Automatic ETag generation for caching
+- **Gzip/Brotli**: Files are already Brotli-compressed in the bundle
+
+## Best Practices
+
+<Note>
+  **Performance Tips:**
+  - Use `http.StripPrefix` when mounting at a path prefix
+  - Enable development mode only in non-production environments
+  - Consider using a CDN in production for better performance
+  - Add cache headers for static assets
+</Note>
+
+<Note>
+  **Security:**
+  - The Server respects the bundle structure and cannot access files outside the prefix
+  - Path normalization prevents directory traversal attacks
+  - No directory listing is exposed
+</Note>

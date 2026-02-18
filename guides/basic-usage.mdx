@@ -1,0 +1,245 @@
+---
+title: Basic Usage
+description: Learn the basic workflow for embedding static files with Broccoli
+---
+
+## Overview
+
+Broccoli makes it easy to embed static files into your Go binaries using brotli compression. This guide covers the essential workflow from setup to deployment.
+
+## Quick Start
+
+<Steps>
+  <Step title="Install Broccoli">
+    First, install the Broccoli command-line tool:
+
+    ```bash
+    go get -u aletheia.icu/broccoli
+    ```
+  </Step>
+
+  <Step title="Add the Generate Directive">
+    In your Go file, add a `go:generate` directive to specify which files to embed:
+
+    ```go
+    package main
+
+    import "aletheia.icu/broccoli/fs"
+
+    //go:generate broccoli -src public -o assets
+
+    func main() {
+        // Your code here
+    }
+    ```
+
+    This directive tells Broccoli to:
+    - Read files from the `public` directory
+    - Generate a file named `assets.gen.go`
+    - Create a variable named `assets` (derived from the filename)
+  </Step>
+
+  <Step title="Run go generate">
+    Execute the generate command to create your embedded file system:
+
+    ```bash
+    go generate
+    ```
+
+    This creates `assets.gen.go` containing your compressed files.
+  </Step>
+
+  <Step title="Use the Embedded Files">
+    Access your embedded files using the generated variable:
+
+    ```go
+    package main
+
+    import (
+        "log"
+        "aletheia.icu/broccoli/fs"
+    )
+
+    //go:generate broccoli -src public -o assets
+
+    func main() {
+        // Open a file from the embedded filesystem
+        f, err := assets.Open("public/index.html")
+        if err != nil {
+            log.Fatal(err)
+        }
+        defer f.Close()
+
+        // Read the file contents
+        data := make([]byte, 1024)
+        n, err := f.Read(data)
+        if err != nil {
+            log.Fatal(err)
+        }
+        log.Printf("Read %d bytes", n)
+    }
+    ```
+  </Step>
+</Steps>
+
+## Working with Files
+
+### Opening Files
+
+The `Open()` method returns an `http.File` interface:
+
+```go
+f, err := assets.Open("public/style.css")
+if err != nil {
+    // Handle error (file not found, etc.)
+}
+defer f.Close()
+```
+
+### Getting File Information
+
+Use `Stat()` to get file metadata:
+
+```go
+info, err := assets.Stat("public/index.html")
+if err != nil {
+    log.Fatal(err)
+}
+
+fmt.Printf("File: %s\n", info.Name())
+fmt.Printf("Size: %d bytes\n", info.Size())
+fmt.Printf("Modified: %v\n", info.ModTime())
+fmt.Printf("Is Directory: %v\n", info.IsDir())
+```
+
+### Walking the File Tree
+
+Iterate through all embedded files:
+
+```go
+import (
+    "os"
+    "path/filepath"
+    "aletheia.icu/broccoli/fs"
+)
+
+func init() {
+    err := assets.Walk("public", func(path string, info os.FileInfo, err error) error {
+        if err != nil {
+            return err
+        }
+        
+        if !info.IsDir() {
+            fmt.Printf("File: %s (size: %d bytes)\n", path, info.Size())
+        }
+        return nil
+    })
+    
+    if err != nil {
+        log.Fatal(err)
+    }
+}
+```
+
+## Path Handling
+
+<Note>
+Broccoli normalizes paths automatically. All of these are equivalent:
+- `assets.Open("public/index.html")`
+- `assets.Open("/public/index.html")`
+- `assets.Open("./public/index.html")`
+</Note>
+
+## Common Patterns
+
+<Tabs>
+  <Tab title="Web Assets">
+    Embed your web application's static files:
+
+    ```go
+    //go:generate broccoli -src public
+
+    func main() {
+        http.Handle("/", assets.Serve("public"))
+        http.ListenAndServe(":8080", nil)
+    }
+    ```
+  </Tab>
+
+  <Tab title="Templates">
+    Embed HTML templates:
+
+    ```go
+    //go:generate broccoli -src templates
+
+    func loadTemplates() (*template.Template, error) {
+        tmpl := template.New("")
+        
+        err := templates.Walk("templates", func(path string, info os.FileInfo, err error) error {
+            if err != nil {
+                return err
+            }
+            
+            if !info.IsDir() && strings.HasSuffix(path, ".html") {
+                f, err := templates.Open(path)
+                if err != nil {
+                    return err
+                }
+                defer f.Close()
+                
+                data, err := ioutil.ReadAll(f)
+                if err != nil {
+                    return err
+                }
+                
+                _, err = tmpl.New(path).Parse(string(data))
+                return err
+            }
+            return nil
+        })
+        
+        return tmpl, err
+    }
+    ```
+  </Tab>
+
+  <Tab title="Configuration Files">
+    Embed default configuration:
+
+    ```go
+    //go:generate broccoli -src config
+
+    func loadConfig() (*Config, error) {
+        f, err := config.Open("config/defaults.json")
+        if err != nil {
+            return nil, err
+        }
+        defer f.Close()
+        
+        var cfg Config
+        if err := json.NewDecoder(f).Decode(&cfg); err != nil {
+            return nil, err
+        }
+        
+        return &cfg, nil
+    }
+    ```
+  </Tab>
+</Tabs>
+
+## Next Steps
+
+<CardGroup cols={2}>
+  <Card title="Advanced Usage" icon="gear" href="/guides/advanced-usage">
+    Learn about multiple directories, patterns, and build tags
+  </Card>
+  <Card title="HTTP Server" icon="server" href="/guides/http-server">
+    Serve embedded files over HTTP
+  </Card>
+  <Card title="Compression" icon="compress" href="/guides/compression">
+    Optimize compression for your use case
+  </Card>
+  <Card title="Development Mode" icon="code" href="/guides/development-mode">
+    Use local files during development
+  </Card>
+</CardGroup>
