@@ -166,11 +166,21 @@ package main
 
 //go:generate broccoli -src public
 
-import "aletheia.icu/broccoli/fs"
+import (
+    "io"
+    "log"
+    "aletheia.icu/broccoli/fs"
+)
 
 func main() {
-    // Use the generated 'br' variable
-    data, _ := br.ReadFile("index.html")
+    // Open a file from the embedded bundle
+    file, err := br.Open("index.html")
+    if err != nil {
+        log.Fatal(err)
+    }
+    defer file.Close()
+    
+    data, _ := io.ReadAll(file)
     println(string(data))
 }
 ```
@@ -187,11 +197,21 @@ package main
 
 //go:generate broccoli -src assets -o broccoli -var broccoli
 
-import "aletheia.icu/broccoli/fs"
+import (
+    "io"
+    "log"
+    "aletheia.icu/broccoli/fs"
+)
 
 func main() {
-    // Use the 'broccoli' variable
-    data, _ := broccoli.ReadFile("logo.png")
+    // Open a file from the embedded bundle
+    file, err := broccoli.Open("logo.png")
+    if err != nil {
+        log.Fatal(err)
+    }
+    defer file.Close()
+    
+    data, _ := io.ReadAll(file)
 }
 ```
 

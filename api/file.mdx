@@ -31,6 +31,33 @@ type File struct {
 
 ## File Operations
 
+### Open
+
+Opens the file for reading. If the file is compressed and optional decompression is enabled, it will be decompressed at this time.
+
+```go
+func (f *File) Open() error
+```
+
+<ResponseField name="error" type="error">
+  Returns an error if decompression fails, otherwise nil.
+</ResponseField>
+
+<Note>
+  This method is typically called internally by `Broccoli.Open()`. You rarely need to call it directly unless you're working with `File` objects obtained through other means like `Walk()` or `Readdir()`.
+</Note>
+
+**Example:**
+
+```go
+// Usually not called directly - Broccoli.Open() calls this internally
+var file *File
+err := file.Open()
+if err != nil {
+    log.Fatal("Failed to open file:", err)
+}
+```
+
 ### Read
 
 Reads the next len(p) bytes from the buffer or until the buffer is drained.
