@@ -1,0 +1,70 @@
+{
+  "projectType": "cli-tool",
+  "projectName": "Broccoli",
+  "projectDescription": "A CLI tool that uses brotli compression to embed static files as a virtual filesystem in Go executables.",
+  "theme": "aspen",
+  "primaryColor": "#4A7C59",
+  "lightColor": "#6B9B7A",
+  "darkColor": "#2D5A3D",
+  "navigation": {
+    "tabs": [
+      {
+        "tab": "Documentation",
+        "groups": [
+          {
+            "group": "Get Started",
+            "pages": ["introduction", "installation", "quickstart"]
+          },
+          {
+            "group": "CLI Reference",
+            "pages": ["cli/overview", "cli/commands", "cli/flags"]
+          },
+          {
+            "group": "Guides",
+            "pages": ["guides/basic-usage", "guides/advanced-usage", "guides/compression", "guides/http-server", "guides/development-mode"]
+          }
+        ]
+      },
+      {
+        "tab": "API Reference",
+        "groups": [
+          {
+            "group": "Core Types",
+            "pages": ["api/broccoli", "api/file"]
+          },
+          {
+            "group": "Functions",
+            "pages": ["api/pack", "api/new", "api/serve"]
+          }
+        ]
+      }
+    ]
+  },
+  "keyFeatures": [
+    "Brotli compression for 13-25% smaller binaries",
+    "Multiple source directories support",
+    "Optional lazy decompression",
+    "WebAssembly (wasm/js) compatibility",
+    "Gitignore integration",
+    "HTTP filesystem interface",
+    "Development mode for rapid iteration"
+  ],
+  "publicApiSurface": [
+    "broccoli -src <dir> -o <file> -var <name>",
+    "broccoli -include <pattern>",
+    "broccoli -exclude <pattern>",
+    "broccoli -opt",
+    "broccoli -gitignore",
+    "broccoli -quality <1-11>",
+    "Broccoli.Open(path)",
+    "Broccoli.Stat(path)",
+    "Broccoli.Walk(root, walkFn)",
+    "Broccoli.Serve(dir)",
+    "Broccoli.Development(mode)",
+    "File.Read(b)",
+    "File.Seek(offset, whence)",
+    "File.Close()",
+    "fs.New(opt, bundle)",
+    "fs.Pack(files, quality)"
+  ]
+}
